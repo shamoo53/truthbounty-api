@@ -130,7 +130,7 @@ export class AuditTrailService {
     offset = 0,
   ): Promise<{ logs: AuditLog[]; total: number }> {
     const query = this.auditLogRepo.createQueryBuilder('audit')
-      .relations('user')
+      .leftJoinAndSelect('audit.user', 'user')
       .orderBy('audit.createdAt', 'DESC');
 
     if (entityType) {
@@ -163,11 +163,6 @@ export class AuditTrailService {
     offset = 0,
   ): Promise<{ logs: AuditLog[]; total: number }> {
     const [logs, total] = await this.auditLogRepo.findAndCount({
-      where: {
-        createdAt: {
-          // TypeORM comparisons
-        },
-      },
       order: { createdAt: 'DESC' },
       skip: offset,
       take: limit,
@@ -241,16 +236,17 @@ export class AuditTrailService {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
 
-    const result = await this.auditLogRepo.delete({
-      createdAt: {
-        // TypeORM doesn't support < for SQLite, so we use raw query
-      },
-    });
+    // Use raw query due to TypeORM SQLite limitations with date comparisons
+    const query = this.auditLogRepo.createQueryBuilder('audit')
+      .delete()
+      .where('audit.createdAt < :cutoff', { cutoff: cutoffDate });
+
+    const result = await query.execute();
 
     this.logger.log(
-      `Purged ${result.affected} audit logs older than ${daysToKeep} days`,
+      `Purged ${result.affected || 0} audit logs older than ${daysToKeep} days`,
     );
-    return result.affected;
+    return result.affected || 0;
   }
 
   private getClientIp(): string | undefined {

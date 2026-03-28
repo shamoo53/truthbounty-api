@@ -118,7 +118,9 @@ export class AuditLoggingInterceptor implements NestInterceptor {
 
       for (const part of parts) {
         if (part.startsWith('args[') && part.endsWith(']')) {
-          const index = parseInt(part.match(/\d+/)[0], 10);
+          const matches = part.match(/\d+/);
+          if (!matches) continue;
+          const index = parseInt(matches[0], 10);
           current = current[index];
         } else if (part === 'args') {
           continue;
@@ -142,7 +144,8 @@ export class AuditLoggingInterceptor implements NestInterceptor {
     if (dto?.userId) return dto.userId;
 
     // Try to extract from request user
-    if (this.request?.user?.id) return (this.request.user as any).id;
+    const user = (this.request as any)?.user;
+    if (user?.id) return user.id;
 
     return undefined;
   }
