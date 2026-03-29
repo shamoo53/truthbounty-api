@@ -22,6 +22,8 @@ import { ClaimsModule } from './claims/claims.module';
 import { AuditModule } from './audit/audit.module';
 import { ThemeModule } from './theme.module';
 import { AuditLoggingInterceptor } from './audit/interceptors/audit-logging.interceptor';
+import { LoggerModule } from './logger/logger.module';
+import { LoggingInterceptor } from './logger/logging.interceptor';
 
 // In-memory storage for development (no Redis needed)
 class ThrottlerMemoryStorage {
@@ -188,6 +190,7 @@ async function createThrottlerStorage(configService: ConfigService): Promise<any
       },
     }),
     RedisModule,
+    LoggerModule,
     BlockchainModule,
     DisputeModule,
     IdentityModule,
@@ -211,6 +214,10 @@ async function createThrottlerStorage(configService: ConfigService): Promise<any
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditLoggingInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: LoggingInterceptor,
     },
   ],
 })

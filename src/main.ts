@@ -2,9 +2,13 @@ import { NestFactory } from '@nestjs/core';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { Logger } from 'nestjs-pino';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  
+  // Use Pino logger for structured JSON logging
+  app.useLogger(app.get(Logger));
   
   // Enable strict validation
   app.useGlobalPipes(
