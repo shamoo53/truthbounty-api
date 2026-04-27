@@ -33,7 +33,7 @@ export class LoggingInterceptor implements NestInterceptor {
         params: Object.keys(params || {}).length ? params : undefined,
         hasBody: !!body && Object.keys(body).length > 0,
         userAgent: request.headers['user-agent'],
-        ip: request.ip || request.headers['x-forwarded-for'],
+        ip: request.ip,
       },
       `Incoming ${method} ${url}`,
     );
