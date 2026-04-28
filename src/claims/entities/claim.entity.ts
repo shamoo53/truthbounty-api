@@ -9,6 +9,18 @@ export class Claim {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ type: 'varchar', length: 200 })
+  title: string;
+
+  @Column({ type: 'text' })
+  content: string;
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  source: string | null;
+
+  @Column({ type: 'json', nullable: true })
+  metadata: Record<string, any> | null;
+
   @Column({ type: 'boolean', nullable: true })
   resolvedVerdict: boolean | null;
 

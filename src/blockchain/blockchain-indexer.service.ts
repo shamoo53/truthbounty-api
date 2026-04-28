@@ -95,8 +95,11 @@ export class BlockchainIndexerService {
   async replayFromBlock(startBlock: number): Promise<void> {
     this.logger.log(`Starting replay from block ${startBlock}`);
 
-    // Delete processed events from startBlock onwards
-    await this.processedEventRepo.delete({ blockNumber: startBlock });
+    // Delete processed events from startBlock onwards (>= to prevent stale events)
+    await this.processedEventRepo.createQueryBuilder()
+      .delete()
+      .where('blockNumber >= :startBlock', { startBlock })
+      .execute();
 
     // Note: In a real implementation, you'd fetch events from blockchain
     // For now, assume events are provided externally or mocked

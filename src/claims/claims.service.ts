@@ -2,7 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Claim } from './entities/claim.entity';
+import { CreateClaimDto } from './dto/create-claim.dto';
 import { ClaimsCache } from '../cache/claims.cache';
+import { RedisService } from '../redis/redis.service';
 import { Stake } from '../staking/entities/stake.entity';
 import { AuditTrailService } from '../audit/services/audit-trail.service';
 import { AuditActionType, AuditEntityType } from '../audit/entities/audit-log.entity';
@@ -18,6 +20,7 @@ export class ClaimsService {
         @InjectRepository(Stake)
         private readonly stakeRepo: Repository<Stake>,
         private readonly claimsCache: ClaimsCache,
+        private readonly redisService: RedisService,
         private readonly auditTrailService: AuditTrailService,
     ) { }
 
@@ -76,25 +79,33 @@ export class ClaimsService {
     }
 
     /**
-     * Create a new claim (Added for Load Testing purposes)
+     * Create a new claim
      */
     @AuditLog({
         actionType: AuditActionType.CLAIM_CREATED,
         entityType: AuditEntityType.CLAIM,
-        descriptionTemplate: 'New claim created',
+        descriptionTemplate: 'New claim created: {{title}}',
         captureAfterState: true,
     })
-    async createClaim(data: any): Promise<Claim> {
+    async createClaim(createClaimDto: CreateClaimDto): Promise<Claim> {
         const claim = this.claimRepo.create({
-            resolvedVerdict: Math.random() > 0.5,
-            confidenceScore: Math.random() * 0.9 + 0.1, // Generate mock score
+            title: createClaimDto.title,
+            content: createClaimDto.content,
+            source: createClaimDto.source,
+            metadata: createClaimDto.metadata,
+            resolvedVerdict: null, // Will be computed later
+            confidenceScore: null, // Will be computed later
             finalized: false,
         });
         const savedClaim = await this.claimRepo.save(claim);
 
-        // Using setClaim caching to simulate real world workload
+        // Cache the new claim
         await this.claimsCache.setClaim(savedClaim.id, savedClaim);
 
+        // Invalidate latest claims cache since we added a new claim
+        await this.redisService.del('claims:latest');
+
+        this.logger.log(`Created new claim: ${savedClaim.id} - ${savedClaim.title}`);
         return savedClaim;
     }
 

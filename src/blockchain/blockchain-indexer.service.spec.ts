@@ -106,12 +106,37 @@ describe('BlockchainIndexerService', () => {
   });
 
   describe('replayFromBlock', () => {
-    it('should delete events from startBlock and replay', async () => {
-      jest.spyOn(processedEventRepo, 'delete').mockResolvedValue({ affected: 1 } as any);
+    it('should delete events from startBlock onward and replay', async () => {
+      const createQueryBuilder = jest.fn().mockReturnValue({
+        delete: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            execute: jest.fn().mockResolvedValue({ affected: 3, raw: {} })
+          })
+        })
+      });
+      jest.spyOn(processedEventRepo, 'createQueryBuilder').mockImplementation(createQueryBuilder);
 
       await service.replayFromBlock(100);
 
-      expect(processedEventRepo.delete).toHaveBeenCalledWith({ blockNumber: 100 });
+      expect(processedEventRepo.createQueryBuilder).toHaveBeenCalled();
+      expect(createQueryBuilder().delete().where).toHaveBeenCalledWith('blockNumber >= :startBlock', { startBlock: 100 });
+    });
+
+    it('should prevent double processing by cleaning up all future events', async () => {
+      // Test that ensures events from blocks 100, 101, 102+ are all cleaned up
+      const createQueryBuilder = jest.fn().mockReturnValue({
+        delete: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            execute: jest.fn().mockResolvedValue({ affected: 5, raw: {} })
+          })
+        })
+      });
+      jest.spyOn(processedEventRepo, 'createQueryBuilder').mockImplementation(createQueryBuilder);
+
+      await service.replayFromBlock(100);
+
+      // Verify the query uses >= to clean up all events from startBlock onward
+      expect(createQueryBuilder().delete().where).toHaveBeenCalledWith('blockNumber >= :startBlock', { startBlock: 100 });
     });
   });
 });
