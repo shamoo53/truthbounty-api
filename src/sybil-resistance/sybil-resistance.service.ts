@@ -65,7 +65,7 @@ export class SybilResistanceService {
     }
 
     // 2. Gather all signals
-    const signals = await this.gatherSignals(userId, user.wallets);
+    const signals = await this.gatherSignals(user, user.wallets);
 
     // 3. Normalize each signal to 0-1 range
     const normalizedScores = this.normalizeSignals(signals);
@@ -86,12 +86,9 @@ export class SybilResistanceService {
    * Gather all signals for a user
    */
   private async gatherSignals(
-    userId: string,
+    user: { worldcoinVerified?: boolean } | null,
     wallets: Array<{ linkedAt: Date }>,
   ): Promise<SybilSignals> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
 
     // Calculate wallet age (use oldest linked wallet)
     const oldestWalletAgeMs = wallets.length > 0
