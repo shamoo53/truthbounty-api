@@ -27,7 +27,15 @@ import { LoggingInterceptor } from './logger/logging.interceptor';
 
 // In-memory storage for development (no Redis needed)
 class ThrottlerMemoryStorage {
-  private storage = new Map<string, { count: number; expiresAt: number }>();
+  private storage = new Map<
+    string,
+    {
+      totalHits: number;
+      expiresAt: number;
+      blockExpiresAt: number;
+      isBlocked: boolean;
+    }
+  >();
   private readonly logger = new Logger('ThrottlerMemoryStorage');
 
   constructor() {
@@ -44,14 +52,14 @@ class ThrottlerMemoryStorage {
     const now = Date.now();
     const record = this.storage.get(key);
 
-    // Clean up expired entries periodically
-    if (Math.random() < 0.01) {
-      this.cleanup();
-    }
-
-    if (!record || record.expiresAt < now) {
-      // Key doesn't exist or expired, create new
-      this.storage.set(key, { count: 1, expiresAt: now + ttl });
+    if (!record) {
+      const newRecord = {
+        totalHits: 1,
+        expiresAt: now + ttl,
+        blockExpiresAt: 0,
+        isBlocked: false,
+      };
+      this.storage.set(key, newRecord);
       return {
         totalHits: 1,
         timeToExpire: ttl,
@@ -60,25 +68,43 @@ class ThrottlerMemoryStorage {
       };
     }
 
-    // Increment existing key
-    record.count++;
+    if (record.isBlocked) {
+      if (record.blockExpiresAt <= now) {
+        record.isBlocked = false;
+        record.totalHits = 1;
+        record.expiresAt = now + ttl;
+        record.blockExpiresAt = 0;
+      } else {
+        return {
+          totalHits: record.totalHits,
+          timeToExpire: Math.max(record.expiresAt - now, 0),
+          isBlocked: true,
+          timeToBlockExpire: Math.max(record.blockExpiresAt - now, 0),
+        };
+      }
+    }
+
+    if (record.expiresAt <= now) {
+      record.totalHits = 1;
+      record.expiresAt = now + ttl;
+    } else {
+      record.totalHits++;
+    }
+
+    if (record.totalHits > limit && !record.isBlocked) {
+      record.isBlocked = true;
+      record.blockExpiresAt = now + blockDuration;
+      record.expiresAt = now + ttl;
+    }
+
     this.storage.set(key, record);
 
     return {
-      totalHits: record.count,
-      timeToExpire: record.expiresAt - now,
-      isBlocked: false,
-      timeToBlockExpire: 0,
+      totalHits: record.totalHits,
+      timeToExpire: Math.max(record.expiresAt - now, 0),
+      isBlocked: record.isBlocked,
+      timeToBlockExpire: record.isBlocked ? Math.max(record.blockExpiresAt - now, 0) : 0,
     };
-  }
-
-  private cleanup() {
-    const now = Date.now();
-    for (const [key, value] of this.storage.entries()) {
-      if (value.expiresAt < now) {
-        this.storage.delete(key);
-      }
-    }
   }
 }
 
@@ -99,22 +125,49 @@ class ThrottlerRedisStorage {
     blockDuration: number,
     throttlerName: string,
   ): Promise<{ totalHits: number; timeToExpire: number; isBlocked: boolean; timeToBlockExpire: number }> {
-    const multi = this.redis.multi();
-    multi.incr(key);
-    multi.pttl(key);
+    const blockKey = `${key}:blocked`;
+    const [blocked, blockTimeToExpire] = await Promise.all([
+      this.redis.exists(blockKey),
+      this.redis.pttl(blockKey),
+    ]);
 
-    const results = await multi.exec();
-    const totalHits = results?.[0]?.[1] as number;
-    let timeToExpire = results?.[1]?.[1] as number;
+    if (blocked) {
+      const timeToExpire = await this.redis.pttl(key);
+      return {
+        totalHits: await this.redis.get(key).then((value: string | null) => Number(value) || limit + 1),
+        timeToExpire: timeToExpire > 0 ? timeToExpire : ttl,
+        isBlocked: true,
+        timeToBlockExpire: blockTimeToExpire > 0 ? blockTimeToExpire : 0,
+      };
+    }
 
-    if (timeToExpire === -1) {
+    const [totalHits, existingTtl] = await Promise.all([
+      this.redis.incr(key),
+      this.redis.pttl(key),
+    ]);
+
+    let timeToExpire = existingTtl;
+    if (timeToExpire === -1 || timeToExpire === -2) {
       await this.redis.pexpire(key, ttl);
       timeToExpire = ttl;
     }
 
+    if (totalHits > limit) {
+      await Promise.all([
+        this.redis.set(blockKey, '1', 'PX', blockDuration),
+        this.redis.pexpire(key, blockDuration),
+      ]);
+      return {
+        totalHits,
+        timeToExpire: blockDuration,
+        isBlocked: true,
+        timeToBlockExpire: blockDuration,
+      };
+    }
+
     return {
       totalHits,
-      timeToExpire,
+      timeToExpire: timeToExpire > 0 ? timeToExpire : ttl,
       isBlocked: false,
       timeToBlockExpire: 0,
     };
